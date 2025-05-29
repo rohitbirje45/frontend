@@ -10,29 +10,26 @@ pipeline {
     stages {
         stage('Clone Repository') {
             steps {
+                // You can skip cloning locally if you want, or just for archive
                 git branch: 'main', url: 'https://github.com/rohitbirje45/frontend.git'
             }
         }
 
-        stage('Install & Build React App') {
-            steps {
-                sh """
-                    npm install
-                    npm run build
-                """
-            }
-        }
-
-        stage('Deploy to EC2') {
+        stage('Deploy & Build on Remote EC2') {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'KEY')]) {
+                    // Copy all source files to remote server
                     sh """
-                        ssh -i \$KEY -o StrictHostKeyChecking=no ${DOCKER_USER}@${DOCKER_HOST_IP} '
-                            rm -rf ${REMOTE_APP_DIR} && mkdir -p ${REMOTE_APP_DIR}
-                        '
+                    scp -i \$KEY -o StrictHostKeyChecking=no -r * ${DOCKER_USER}@${DOCKER_HOST_IP}:~/${REMOTE_APP_DIR}/
+                    """
 
-                        scp -i \$KEY -o StrictHostKeyChecking=no -r build/* \
-                            ${DOCKER_USER}@${DOCKER_HOST_IP}:${REMOTE_APP_DIR}/
+                    // Run npm commands remotely on EC2 inside app dir
+                    sh """
+                    ssh -i \$KEY -o StrictHostKeyChecking=no ${DOCKER_USER}@${DOCKER_HOST_IP} '
+                        cd ~/${REMOTE_APP_DIR} &&
+                        npm install &&
+                        npm run build
+                    '
                     """
                 }
             }
