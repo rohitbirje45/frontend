@@ -28,7 +28,7 @@ pipeline {
                     ssh -i \$KEY -o StrictHostKeyChecking=no ${DOCKER_USER}@${DOCKER_HOST_IP} '
                         cd ~/${REMOTE_APP_DIR} &&
                         npm install &&
-                        npm run build
+                        npm start
                     '
                     """
                 }
