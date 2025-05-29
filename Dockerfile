@@ -7,7 +7,7 @@ COPY package.json package-lock.json* ./
 RUN npm install
 
 COPY . ./
-RUN NODE_OPTIONS="--max_old_space_size=1024" npm run build
+RUN NODE_OPTIONS="--max_old_space_size=2048" npm run build
 
 # Step 2: Serve the app with a static server
 FROM nginx:alpine
