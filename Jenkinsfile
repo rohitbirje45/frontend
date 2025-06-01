@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_HOST_IP = "13.51.40.89"
-        DOCKER_USER = "ubuntu"
-        REMOTE_APP_DIR = "blog-app"
-        APP_NAME = "blog-frontend"
+        DOCKER_HOST_IP  = "13.51.40.89"
+        DOCKER_USER     = "ubuntu"
+        REMOTE_APP_DIR  = "blog-app"
+        APP_NAME        = "blog-frontend"
     }
 
     stages {
@@ -15,45 +15,56 @@ pipeline {
             }
         }
 
-        stage('Build & Deploy on Remote EC2') {
+        stage('Copy & Build on Remote EC2') {
             steps {
-                withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'KEY')]) {
-                    sh """
-                    # 1) Copy all source files to EC2
-                    scp -i \$KEY -o StrictHostKeyChecking=no -r * ${DOCKER_USER}@${DOCKER_HOST_IP}:~/${REMOTE_APP_DIR}/
+                withCredentials([sshUserPrivateKey(
+                    credentialsId: 'ec2-ssh-key',
+                    keyFileVariable: 'KEY'
+                )]) {
+                    sh '''
+                      # 1) Copy entire workspace to the remote host
+                      scp -i $KEY -o StrictHostKeyChecking=no -r * ${DOCKER_USER}@${DOCKER_HOST_IP}:~/${REMOTE_APP_DIR}/
 
-                    # 2) SSH into EC2 and run “build” + “serve” via PM2
-                    ssh -i \$KEY -o StrictHostKeyChecking=no ${DOCKER_USER}@${DOCKER_HOST_IP} '
-                        cd ~/${REMOTE_APP_DIR} &&
+                      # 2) SSH into remote host and do everything (install, build, serve)
+                      ssh -i $KEY -o StrictHostKeyChecking=no ${DOCKER_USER}@${DOCKER_HOST_IP} << 'EOF'
+                        set -e
 
-                        # (a) Install Node + build for production
-                        npm install &&
-                        npm run build &&
+                        cd ~/${REMOTE_APP_DIR}
 
-                        # (b) Install “serve” (if not already installed)
-                        command -v serve >/dev/null 2>&1 || npm install -g serve &&
+                        # Clean up any old builds/processes
+                        pm2 delete ${APP_NAME} || true
+                        rm -rf build
+                        rm -rf node_modules
 
-                        # (c) Stop any existing PM2 instance (to free port 3000)
-                        pm2 delete ${APP_NAME} || true &&
+                        # (a) Install dependencies
+                        npm install
 
-                        # (d) Start “serve” to serve the build/ folder on port 3000
-                        pm2 start serve --name "${APP_NAME}" -- -s build -l 3000 &&
+                        # (b) Build with increased heap size to avoid OOM on small EC2
+                        export NODE_OPTIONS="--max_old_space_size=1024"
+                        npm run build
 
-                        # (e) Save PM2 process list + enable auto‐startup on reboot
-                        pm2 save &&
+                        # (c) Install `serve` locally (in node_modules) to avoid sudo issues
+                        npm install serve --no-save
+
+                        # (d) Start the static build under PM2 on port 3000
+                        pm2 start npx --name "${APP_NAME}" -- serve -s build -l 3000
+
+                        # (e) Save PM2 list & enable auto startup on reboot
+                        pm2 save
                         pm2 startup systemd -u ubuntu --hp /home/ubuntu | tail -n 1 | bash
-                    '
-                    """
+                      EOF
+                    '''
                 }
             }
         }
 
         stage('Selenium Tests') {
             steps {
-                sh """
-                    echo "Running Selenium tests..."
-                    # TODO: Add your Selenium test command here
-                """
+                sh '''
+                  echo "Running Selenium tests against http://${DOCKER_HOST_IP}:3000"
+                  # TODO: actually invoke your Selenium suite here, e.g.:
+                  #   pytest tests/selenium --base-url=http://${DOCKER_HOST_IP}:3000
+                '''
             }
         }
     }
