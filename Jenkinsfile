@@ -15,29 +15,32 @@ pipeline {
             }
         }
 
-        stage('Deploy & Run with PM2 on Remote EC2') {
+        stage('Build & Deploy on Remote EC2') {
             steps {
                 withCredentials([sshUserPrivateKey(credentialsId: 'ec2-ssh-key', keyFileVariable: 'KEY')]) {
                     sh """
-                    # Copy all source files to EC2
+                    # 1) Copy all source files to EC2
                     scp -i \$KEY -o StrictHostKeyChecking=no -r * ${DOCKER_USER}@${DOCKER_HOST_IP}:~/${REMOTE_APP_DIR}/
 
-                    # SSH into EC2 and run commands
+                    # 2) SSH into EC2 and run “build” + “serve” via PM2
                     ssh -i \$KEY -o StrictHostKeyChecking=no ${DOCKER_USER}@${DOCKER_HOST_IP} '
-                        # Go to project directory
                         cd ~/${REMOTE_APP_DIR} &&
-                        
-                        # Install Node modules
+
+                        # (a) Install Node + build for production
                         npm install &&
+                        npm run build &&
 
+                        # (b) Install “serve” (if not already installed)
+                        command -v serve >/dev/null 2>&1 || npm install -g serve &&
 
-                        # Start the app with pm2
-                        pm2 start npm --name "${APP_NAME}" -- start -- --host 0.0.0.0 &&
+                        # (c) Stop any existing PM2 instance (to free port 3000)
+                        pm2 delete ${APP_NAME} || true &&
 
-                        # Save the process list
+                        # (d) Start “serve” to serve the build/ folder on port 3000
+                        pm2 start serve --name "${APP_NAME}" -- -s build -l 3000 &&
+
+                        # (e) Save PM2 process list + enable auto‐startup on reboot
                         pm2 save &&
-
-                        # Enable pm2 startup on reboot
                         pm2 startup systemd -u ubuntu --hp /home/ubuntu | tail -n 1 | bash
                     '
                     """
